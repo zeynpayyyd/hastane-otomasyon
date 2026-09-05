@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hastane Randevu Sistemi</title>
+    
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    
+    <style>
+        body { font-family: Arial, sans-serif; background-color: #f4f4f9; padding: 20px; }
+        .container { max-width: 850px; background: white; padding: 25px; border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); margin: auto; margin-bottom: 20px; }
+        h2 { text-align: center; color: #333; border-bottom: 2px solid #eee; padding-bottom: 10px; }
+        .form-group { margin-bottom: 20px; }
+        label { display: block; font-weight: bold; margin-bottom: 8px; color: #555; }
+        select, input { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 5px; box-sizing: border-box; font-size: 14px; }
+        .kaydet-btn { width: 100%; padding: 12px; background-color: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 16px; font-weight: bold; }
+        .kaydet-btn:hover { background-color: #218838; }
+        
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 14px; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
+        th { background-color: #007bff; color: white; }
+        tr:hover { background-color: #f1f1f1; }
+        .durum-bekliyor { background-color: #ffc107; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; }
+        .brans-etiketi { color: #007bff; font-weight: bold; }
+        .iptal-btn { background-color: #dc3545; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-weight: bold; }
+        .iptal-btn:hover { background-color: #c82333; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>Yeni Randevu Oluştur</h2>
+    <form id="randevuFormu">
+        <div class="form-group">
+            <label for="hastaSecici">Hasta Seçin:</label>
+            <select id="hastaSecici" required>
+                <option value="">-- Lütfen Bir Hasta Seçin --</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="doktorSecici">Doktor Seçin:</label>
+            <select id="doktorSecici" required>
+                <option value="">-- Lütfen Bir Doktor Seçin --</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="randevuTarihi">Tarih ve Saat:</label>
+            <input type="datetime-local" id="randevuTarihi" required>
+        </div>
+        <button type="submit" class="kaydet-btn">Randevuyu Kaydet</button>
+    </form>
+</div>
+
+<div class="container">
+    <h2>Aktif Randevular</h2>
+    <table id="randevuTablosu">
+        <thead>
+            <tr>
+                <th>Hasta Adı</th>
+                <th>Doktor</th>
+                <th>Bölüm / Branş</th>
+                <th>Tarih ve Saat</th>
+                <th>Durum</th>
+                <th>İşlemler</th> </tr>
+        </thead>
+        <tbody>
+            </tbody>
+    </table>
+</div>
+
+<script>
+    // 1. SUPABASE BAĞLANTISI
+    const supabaseUrl = 'https://aqqglfuxjygvwvlwjfmw.supabase.co';
+    const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFxcWdsZnV4anlndnd2bHdqZm13Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA4NTE4MzEsImV4cCI6MjA5NjQyNzgzMX0.EWtT7beZTwXakGIeaYU9bTU3yH1AA71gHwMZBrhyRAU';
+    const db = window.supabase.createClient(supabaseUrl, supabaseKey);
+
+    async function doktorlariGetir() {
+        const { data, error } = await db.from('doktorlar').select('*');
+        if (error) return;
+        const doktorSecici = document.getElementById('doktorSecici');
+        data.forEach(doktor => {
+            const secenek = document.createElement('option');
+            secenek.value = doktor.id;
+            secenek.textContent = `${doktor.isim_soyisim} (${doktor.uzmanlik_alani})`;
+            doktorSecici.appendChild(secenek);
+        });
+    }
+
+    async function hastalariGetir() {
+        const { data, error } = await db.from('hastalar').select('*');
+        if (error) return;
+        const hastaSecici = document.getElementById('hastaSecici');
+        data.forEach(hasta => {
+            const secenek = document.createElement('option');
+            secenek.value = hasta.id;
+            secenek.textContent = `${hasta.isim_soyisim} (TC: ${hasta.tc_kimlik})`; 
+            hastaSecici.appendChild(secenek);
+        });
+    }
+
+    // RANDEVULARI GETİR
+    async function randevulariGetir() {
+        const { data, error } = await db.from('randevular').select(`
+            id,
+            randevu_tarihi,
+            durum,
+            hastalar (isim_soyisim),
+            doktorlar (isim_soyisim, uzmanlik_alani)
+        `);
+
+        if (error) {
+            console.error("Tablo çekme hatası:", error);
+            alert("Dikkat: Randevular listelenemiyor! Lütfen Supabase'den 'randevular' tablosunun RLS kilidini kapattığınızdan emin olun.");
+            return;
+        }
+
+        const tabloGövdesi = document.querySelector('#randevuTablosu tbody');
+        tabloGövdesi.innerHTML = ''; 
+
+        data.forEach(randevu => {
+            const satir = document.createElement('tr');
+            const okunakliTarih = new Date(randevu.randevu_tarihi).toLocaleString('tr-TR');
+            
+            const hastaAdi = randevu.hastalar ? randevu.hastalar.isim_soyisim : 'Kayıp/Silinmiş Hasta';
+            const doktorAdi = randevu.doktorlar ? randevu.doktorlar.isim_soyisim : 'Kayıp Doktor';
+            const brans = randevu.doktorlar ? randevu.doktorlar.uzmanlik_alani : '-';
+
+            satir.innerHTML = `
+                <td>${hastaAdi}</td>
+                <td><strong>${doktorAdi}</strong></td>
+                <td class="brans-etiketi">${brans}</td>
+                <td>${okunakliTarih}</td>
+                <td><span class="durum-bekliyor">${randevu.durum}</span></td>
+                <td><button class="iptal-btn" onclick="randevuIptalEt(${randevu.id})">İptal Et</button></td>
+            `;
+            tabloGövdesi.appendChild(satir);
+        });
+    }
+
+    // YENİ: RANDEVU İPTAL ETME (SİLME) FONKSİYONU
+    async function randevuIptalEt(randevuId) {
+        const onay = confirm("Bu randevuyu iptal etmek istediğinize emin misiniz?");
+        if (!onay) return; // Kullanıcı vazgeçerse işlemi durdur
+
+        const { error } = await db.from('randevular').delete().eq('id', randevuId);
+
+        if (error) {
+            console.error("Silme hatası:", error);
+            alert("Randevu iptal edilemedi!");
+        } else {
+            alert("Randevu başarıyla iptal edildi.");
+            randevulariGetir(); // Listeyi güncel halini göstermek için tekrar çağırıyoruz
+        }
+    }
+
+    // SAYFA YÜKLENİNCE ÇALIŞACAKLAR
+    doktorlariGetir();
+    hastalariGetir();
+    randevulariGetir(); 
+
+    // RANDEVU KAYDETME
+    document.getElementById('randevuFormu').addEventListener('submit', async function(event) {
+        event.preventDefault(); 
+
+        const secilenHastaId = document.getElementById('hastaSecici').value;
+        const secilenDoktorId = document.getElementById('doktorSecici').value;
+        const secilenTarih = document.getElementById('randevuTarihi').value;
+
+        const { error } = await db.from('randevular').insert([
+            { 
+                hasta_id: secilenHastaId, 
+                doktor_id: secilenDoktorId, 
+                randevu_tarihi: secilenTarih,
+                durum: 'Bekliyor' 
+            }
+        ]);
+
+        if (error) {
+            alert("Hata oluştu! Bilgileri kontrol edin.");
+        } else {
+            alert("Harika! Randevu başarıyla oluşturuldu!");
+            document.getElementById('randevuFormu').reset(); 
+            randevulariGetir(); // Kayıttan hemen sonra listeyi güncelle
+        }
+    });
+</script>
+
+</body>
+</html>
